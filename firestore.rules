@@ -27,7 +27,7 @@ service cloud.firestore {
     // 2. User Profiles Collection
     match /users/{userId} {
       allow read: if isSignedIn();
-      allow create, update: if isOwner(userId) && isValidUser(request.resource.data);
+      allow create, update: if (isOwner(userId) || (userId.matches('^partner-[a-zA-Z0-9_\\-]+$') && isSignedIn())) && isValidUser(request.resource.data);
       allow delete: if false;
     }
 
@@ -62,7 +62,7 @@ service cloud.firestore {
     // 4. Subcollection: Party Members
     match /parties/{partyId}/members/{memberId} {
       allow read: if isSignedIn();
-      allow create: if isSignedIn() && isOwner(memberId) && isValidMember(request.resource.data);
+      allow create: if isSignedIn() && (isOwner(memberId) || memberId.matches('^partner-[a-zA-Z0-9_\\-]+$') || get(/databases/$(database)/documents/parties/$(partyId)).data.ownerId == request.auth.uid) && isValidMember(request.resource.data);
       allow update, delete: if isSignedIn() && (isOwner(memberId) || get(/databases/$(database)/documents/parties/$(partyId)).data.ownerId == request.auth.uid);
     }
 
@@ -74,7 +74,7 @@ service cloud.firestore {
     // 5. Subcollection: Active Nudges
     match /parties/{partyId}/nudges/{nudgeId} {
       allow read: if isMemberOfParty(partyId);
-      allow create: if isMemberOfParty(partyId) && request.resource.data.fromUser == request.auth.uid && isValidNudge(request.resource.data);
+      allow create: if isMemberOfParty(partyId) && (request.resource.data.fromUser == request.auth.uid || request.resource.data.fromUser.matches('^partner-[a-zA-Z0-9_\\-]+$')) && isValidNudge(request.resource.data);
       allow delete: if isMemberOfParty(partyId) && (resource.data.fromUser == request.auth.uid || resource.data.toUser == request.auth.uid);
     }
 
