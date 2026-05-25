@@ -1,0 +1,102 @@
+{
+  "entities": {
+    "UserProfile": {
+      "title": "UserProfile",
+      "description": "Stores user statistics, achievements, personal settings and squad membership info",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "description": "The unique user authentication skeleton ID" },
+        "name": { "type": "string", "description": "Display name" },
+        "email": { "type": "string", "description": "User email address" },
+        "avatar": { "type": "string", "description": "User photo URL" },
+        "streak": { "type": "number", "description": "Consecutive weeks active" },
+        "completionRate": { "type": "number", "description": "Checklist completion percentage" },
+        "workoutsCompleted": { "type": "number", "description": "Total logged completions" },
+        "workoutsMissed": { "type": "number", "description": "Total targets missed" },
+        "weeklyTarget": { "type": "number", "description": "Target workout days per week" },
+        "isSlacking": { "type": "boolean", "description": "Whether user is failing to meet active metrics" },
+        "currentPartyId": { "type": "string", "description": "Active party identifier that is currently loaded" }
+      },
+      "required": ["id", "name", "email", "avatar", "streak", "completionRate", "workoutsCompleted", "workoutsMissed", "weeklyTarget", "isSlacking"]
+    },
+    "Party": {
+      "title": "Party",
+      "description": "Stores details about the squad group, its visual plan, settings and penalty rules",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "description": "Party unique slug or ID" },
+        "name": { "type": "string", "description": "Visual name of the training group squad" },
+        "code": { "type": "string", "description": "Short code used for inviting others" },
+        "ownerId": { "type": "string", "description": "Admin owner userid" },
+        "createdAt": { "type": "string", "format": "date-time", "description": "Timestamp of party creation" },
+        "punishmentConfig": { "type": "object", "description": "Model selection and flatrate properties" },
+        "reminderSettings": { "type": "object", "description": "Morning and mid-day scheduler message configs" },
+        "activePlan": { "type": "array", "description": "Parsed collection of training days making up the routine" }
+      },
+      "required": ["id", "name", "code", "ownerId", "punishmentConfig", "reminderSettings", "activePlan"]
+    },
+    "Member": {
+      "title": "Member",
+      "description": "Reflects membership link inside a party",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string" },
+        "joinedAt": { "type": "string", "format": "date-time" },
+        "role": { "type": "string" }
+      },
+      "required": ["userId", "joinedAt", "role"]
+    },
+    "ActiveNudge": {
+      "title": "ActiveNudge",
+      "description": "Stores user-to-user nudge triggers",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "fromUser": { "type": "string" },
+        "toUser": { "type": "string" },
+        "message": { "type": "string" },
+        "channel": { "type": "string" },
+        "timestamp": { "type": "string" }
+      },
+      "required": ["id", "fromUser", "toUser", "message", "channel", "timestamp"]
+    },
+    "HistoryEntry": {
+      "title": "HistoryEntry",
+      "description": "Completed workout list logged to historic records",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "userId": { "type": "string" },
+        "userName": { "type": "string" },
+        "userAvatar": { "type": "string" },
+        "workoutTitle": { "type": "string" },
+        "workoutType": { "type": "string" },
+        "completedAt": { "type": "string" },
+        "exercises": { "type": "array" }
+      },
+      "required": ["id", "userId", "userName", "userAvatar", "workoutTitle", "workoutType", "completedAt", "exercises"]
+    }
+  },
+  "firestore": {
+    "/users/{userId}": {
+      "schema": "UserProfile",
+      "description": "Individual users profiles"
+    },
+    "/parties/{partyId}": {
+      "schema": "Party",
+      "description": "Active training groups and routines"
+    },
+    "/parties/{partyId}/members/{memberId}": {
+      "schema": "Member",
+      "description": "Bridges members connected to a squad"
+    },
+    "/parties/{partyId}/nudges/{nudgeId}": {
+      "schema": "ActiveNudge",
+      "description": "Triggered nudges mapping inside a squad"
+    },
+    "/parties/{partyId}/history/{historyId}": {
+      "schema": "HistoryEntry",
+      "description": "Logging of weekly individual workout checklists"
+    }
+  }
+}
