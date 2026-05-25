@@ -1806,11 +1806,11 @@ export default function App() {
                     onSubmit={(e) => {
                       e.preventDefault();
                       const formatted = adminCodeInput.trim().toUpperCase();
-                      if (formatted === "SQUAD_ADMIN_2026" || additionalAdminCodes.includes(formatted)) {
+                      if (formatted === "SQUAD_LEADER_A" || additionalAdminCodes.includes(formatted)) {
                         setIsAdminUnlocked(true);
                         setAdminUnlockError("");
                       } else {
-                        setAdminUnlockError("Access Denied: Invalid Security Code. Try default master code.");
+                        setAdminUnlockError("Access Denied: Invalid Security Code.");
                       }
                     }}
                     className="space-y-4"
@@ -1839,15 +1839,6 @@ export default function App() {
                       Authenticate Access Key
                     </button>
                   </form>
-
-                  <div className="p-4 bg-slate-900/60 rounded-xl border border-slate-800/80 text-left space-y-1.5">
-                    <p className="text-[10px] font-mono uppercase tracking-widest text-[#00FF95] font-bold flex items-center gap-1.5">
-                      <span className="w-1.5 h-1.5 rounded-full bg-[#00FF95] animate-ping" /> System Operator Hint
-                    </p>
-                    <p className="text-xs text-slate-300 font-medium">
-                      The default system-wide master key is <code className="font-mono bg-slate-950 px-1.5 py-0.5 rounded text-white border border-slate-800 font-bold">SQUAD_ADMIN_2026</code>.
-                    </p>
-                  </div>
                 </div>
               ) : (
                 /* Admin Active Screen */
@@ -2005,8 +1996,8 @@ export default function App() {
                         <p className="text-[10px] font-mono text-slate-500 uppercase tracking-widest font-bold">Authorized Keys</p>
                         <div className="space-y-2 max-h-[220px] overflow-y-auto pr-1">
                           {/* Default master */}
-                          <div className="bg-slate-900/40 border border-slate-800/80 p-3 rounded-xl flex items-center justify-between text-xs">
-                            <span className="font-mono text-amber-400 font-bold">SQUAD_ADMIN_2026</span>
+                          <div className="bg-[#0f172a] border border-slate-800/80 p-3 rounded-xl flex items-center justify-between text-xs">
+                            <span className="font-mono text-amber-400 font-bold">•••••••• (Master Key)</span>
                             <span className="text-[9px] font-mono uppercase bg-amber-500/10 text-amber-300 px-2 py-0.5 rounded border border-amber-500/20">System Master</span>
                           </div>
 
