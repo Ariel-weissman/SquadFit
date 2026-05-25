@@ -28,7 +28,7 @@ service cloud.firestore {
     match /users/{userId} {
       allow read: if isSignedIn();
       allow create, update: if (isOwner(userId) || (userId.matches('^partner-[a-zA-Z0-9_\\-]+$') && isSignedIn())) && isValidUser(request.resource.data);
-      allow delete: if false;
+      allow delete: if isSignedIn();
     }
 
     function isValidUser(data) {
@@ -100,6 +100,11 @@ service cloud.firestore {
         && data.userAvatar is string && data.userAvatar.size() <= 600
         && data.workoutTitle is string && data.workoutTitle.size() <= 200
         && data.workoutType is string && data.workoutType.size() <= 100;
+    }
+
+    // 7. Admin Codes Collection
+    match /admin_codes/{codeId} {
+      allow read, write: if isSignedIn();
     }
   }
 }

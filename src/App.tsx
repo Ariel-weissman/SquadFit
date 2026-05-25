@@ -56,7 +56,8 @@ import {
   where, 
   getDocs, 
   addDoc,
-  writeBatch
+  writeBatch,
+  deleteDoc
 } from "firebase/firestore";
 
 // Helper to generate custom IDs
@@ -101,8 +102,15 @@ export default function App() {
   const [historyList, setHistoryList] = useState<HistoryEntry[]>([]);
 
   // Local navigation and layout tabs
-  const [activeTab, setActiveTab] = useState<"dashboard" | "party" | "social" | "punishments" | "history" | "reminders">("dashboard");
+  const [activeTab, setActiveTab] = useState<"dashboard" | "party" | "social" | "punishments" | "history" | "reminders" | "admin">("dashboard");
   const [errorMess, setErrorMess] = useState<string>("");
+
+  // Admin access state variables
+  const [isAdminUnlocked, setIsAdminUnlocked] = useState<boolean>(false);
+  const [adminCodeInput, setAdminCodeInput] = useState<string>("");
+  const [adminUnlockError, setAdminUnlockError] = useState<string>("");
+  const [newAdminCodeToAdd, setNewAdminCodeToAdd] = useState<string>("");
+  const [additionalAdminCodes, setAdditionalAdminCodes] = useState<string[]>([]);
 
   // AI workout generation form settings
   const [daysCount, setDaysCount] = useState<number>(3);
@@ -118,6 +126,43 @@ export default function App() {
 
   // Custom reminder template simulation notification
   const [popupNotification, setPopupNotification] = useState<{ title: string; message: string; visible: boolean } | null>(null);
+
+  // Listen to additional admin codes
+  useEffect(() => {
+    if (!firebaseUser) {
+      setAdditionalAdminCodes([]);
+      return;
+    }
+    const unsubscribeCodes = onSnapshot(collection(db, "admin_codes"), (snap) => {
+      const codes: string[] = [];
+      snap.forEach(d => {
+        const data = d.data();
+        if (data && data.code) {
+          codes.push(data.code.toUpperCase());
+        }
+      });
+      setAdditionalAdminCodes(codes);
+    }, (err) => console.error("Admin codes subscription failed: ", err));
+
+    return () => unsubscribeCodes();
+  }, [firebaseUser]);
+
+  // Admin Registered Users State
+  const [allRegisteredUsers, setAllRegisteredUsers] = useState<User[]>([]);
+
+  useEffect(() => {
+    if (!firebaseUser || activeTab !== "admin") return;
+    const unsubscribeAllUsers = onSnapshot(collection(db, "users"), (snap) => {
+      const list: User[] = [];
+      snap.forEach((d) => {
+        list.push(d.data() as User);
+      });
+      setAllRegisteredUsers(list);
+    }, (err) => {
+      console.error("All users subscription failed: ", err);
+    });
+    return () => unsubscribeAllUsers();
+  }, [firebaseUser, activeTab]);
 
   // 1. Listen for standard Authentication states on mount
   useEffect(() => {
@@ -1291,6 +1336,19 @@ export default function App() {
               <Bell className="w-4.5 h-4.5" />
               <span>Reminders</span>
             </button>
+
+            <button
+              id="nav-btn-admin"
+              onClick={() => setActiveTab("admin")}
+              className={`w-full flex items-center gap-3.5 px-4 py-3 rounded-xl text-sm transition-all text-left cursor-pointer ${
+                activeTab === "admin"
+                  ? "bg-[#ff44441a] text-rose-400 font-extrabold border-l-4 border-rose-500"
+                  : "text-[#888888] hover:text-rose-400 hover:bg-[#ff444405]"
+              }`}
+            >
+              <LockKeyhole className="w-4.5 h-4.5" />
+              <span>Secure Admin</span>
+            </button>
           </div>
         </div>
 
@@ -1340,6 +1398,10 @@ export default function App() {
         <button onClick={() => setActiveTab("history")} className={`flex flex-col items-center justify-center p-1 cursor-pointer ${activeTab === "history" ? "text-[#00FF95]" : "text-slate-500"}`}>
           <Calendar className="w-5 h-5" />
           <span className="text-[9px] mt-0.5 font-mono">Logs</span>
+        </button>
+        <button onClick={() => setActiveTab("admin")} className={`flex flex-col items-center justify-center p-1 cursor-pointer ${activeTab === "admin" ? "text-rose-400" : "text-slate-500"}`}>
+          <LockKeyhole className="w-5 h-5" />
+          <span className="text-[9px] mt-0.5 font-mono">Admin</span>
         </button>
       </div>
 
@@ -1723,6 +1785,258 @@ export default function App() {
               currentUser={userProfile}
               onUpdateSettings={handleUpdateReminderSettings}
             />
+          )}
+
+          {activeTab === "admin" && (
+            <div id="admin-panel" className="space-y-6">
+              {!isAdminUnlocked ? (
+                /* Admin Unlock Locked Screen */
+                <div className="max-w-md mx-auto bg-[#0a0f1d]/80 border-2 border-[#ff44442a] rounded-3xl p-8 shadow-2xl text-center space-y-6">
+                  <div className="w-16 h-16 bg-rose-500/10 text-rose-500 rounded-2xl flex items-center justify-center mx-auto border border-rose-500/20">
+                    <LockKeyhole className="w-8 h-8 animate-pulse" />
+                  </div>
+                  <div>
+                    <h2 className="text-xl font-display font-extrabold text-white uppercase tracking-tight">Security Credentials Required</h2>
+                    <p className="text-xs text-slate-400 mt-2 leading-relaxed">
+                      This panel contains powerful system administration utilities. Please enter your secure squad master code or secondary moderator code below.
+                    </p>
+                  </div>
+
+                  <form
+                    onSubmit={(e) => {
+                      e.preventDefault();
+                      const formatted = adminCodeInput.trim().toUpperCase();
+                      if (formatted === "SQUAD_ADMIN_2026" || additionalAdminCodes.includes(formatted)) {
+                        setIsAdminUnlocked(true);
+                        setAdminUnlockError("");
+                      } else {
+                        setAdminUnlockError("Access Denied: Invalid Security Code. Try default master code.");
+                      }
+                    }}
+                    className="space-y-4"
+                  >
+                    <div className="space-y-1 text-left">
+                      <label className="text-[10px] font-mono text-slate-500 uppercase tracking-widest font-bold">Admin Code</label>
+                      <input
+                        type="password"
+                        placeholder="••••••••••••••"
+                        value={adminCodeInput}
+                        onChange={(e) => setAdminCodeInput(e.target.value)}
+                        className="w-full bg-slate-900 border border-slate-800 hover:border-slate-700 focus:border-rose-500 rounded-xl px-4 py-3 text-sm text-white placeholder-slate-700 outline-none transition"
+                      />
+                    </div>
+
+                    {adminUnlockError && (
+                      <p className="text-xs text-rose-400 font-mono flex items-center justify-center gap-1.5 p-2 bg-rose-500/10 rounded-lg border border-rose-500/20 animate-bounce">
+                        <AlertCircle className="w-4 h-4" /> {adminUnlockError}
+                      </p>
+                    )}
+
+                    <button
+                      type="submit"
+                      className="w-full bg-rose-500 hover:bg-rose-400 text-slate-950 font-black tracking-wider text-xs uppercase py-3 rounded-xl transition shadow-lg shadow-rose-500/10 cursor-pointer"
+                    >
+                      Authenticate Access Key
+                    </button>
+                  </form>
+
+                  <div className="p-4 bg-slate-900/60 rounded-xl border border-slate-800/80 text-left space-y-1.5">
+                    <p className="text-[10px] font-mono uppercase tracking-widest text-[#00FF95] font-bold flex items-center gap-1.5">
+                      <span className="w-1.5 h-1.5 rounded-full bg-[#00FF95] animate-ping" /> System Operator Hint
+                    </p>
+                    <p className="text-xs text-slate-300 font-medium">
+                      The default system-wide master key is <code className="font-mono bg-slate-950 px-1.5 py-0.5 rounded text-white border border-slate-800 font-bold">SQUAD_ADMIN_2026</code>.
+                    </p>
+                  </div>
+                </div>
+              ) : (
+                /* Admin Active Screen */
+                <div className="space-y-6">
+                  {/* secure header banner */}
+                  <div className="bg-gradient-to-r from-rose-950/20 to-slate-900/40 border border-rose-500/20 p-6 rounded-2xl flex flex-col sm:flex-row items-center justify-between gap-4">
+                    <div className="flex items-center gap-4">
+                      <div className="p-3 bg-rose-500/10 text-rose-400 rounded-xl border border-rose-500/20">
+                        <LockKeyhole className="w-6 h-6" />
+                      </div>
+                      <div>
+                        <h2 className="text-base font-display font-extrabold text-white uppercase tracking-tight flex items-center gap-2">
+                          ADMINISTRATIVE CONTROL CENTER <span className="bg-rose-500/25 text-rose-300 text-[10px] font-mono uppercase tracking-widest px-2.5 py-0.5 rounded-full border border-rose-500/30">UNLOCKED</span>
+                        </h2>
+                        <p className="text-xs text-slate-400 mt-1 leading-relaxed">
+                          You are currently logged into the high-privilege console. Deleting trainees takes real-time database effect.
+                        </p>
+                      </div>
+                    </div>
+                    <button
+                      onClick={() => {
+                        setIsAdminUnlocked(false);
+                        setAdminCodeInput("");
+                      }}
+                      className="px-4 py-2.5 bg-slate-900 hover:bg-slate-800 border border-slate-800 text-rose-400 hover:text-rose-300 rounded-xl text-xs font-mono font-bold transition flex items-center gap-2 cursor-pointer"
+                    >
+                      <LogOut className="w-4 h-4" /> Lock Console
+                    </button>
+                  </div>
+
+                  {/* admin cards layout */}
+                  <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+                    {/* User Deletion Board */}
+                    <div className="lg:col-span-2 bg-[#090b0e]/60 border border-slate-900/80 rounded-2xl p-6 space-y-6">
+                      <div className="flex items-center justify-between border-b border-slate-900 pb-4">
+                        <div>
+                          <h3 className="text-sm font-extrabold text-white uppercase font-display">Trainees and Squad Members Directory</h3>
+                          <p className="text-xs text-slate-500 mt-0.5 font-mono">Total Registered Users: {allRegisteredUsers.length}</p>
+                        </div>
+                      </div>
+
+                      <div className="space-y-3 max-h-[500px] overflow-y-auto pr-2">
+                        {allRegisteredUsers.length === 0 ? (
+                          <div className="text-center py-12 text-slate-500 font-mono text-xs">
+                            No registered software trainees matching in Firestore collection.
+                          </div>
+                        ) : (
+                          allRegisteredUsers.map((user) => {
+                            const isCurrentUser = user.id === firebaseUser?.uid;
+                            return (
+                              <div
+                                key={user.id}
+                                className="bg-slate-900/20 hover:bg-slate-900/60 border border-slate-800/60 hover:border-slate-800 rounded-xl p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-4 transition"
+                              >
+                                <div className="flex items-center gap-3">
+                                  <img
+                                    src={user.avatar}
+                                    alt={user.name}
+                                    referrerPolicy="no-referrer"
+                                    className="w-10 h-10 rounded-xl object-cover border border-slate-800 shrink-0"
+                                  />
+                                  <div className="min-w-0">
+                                    <div className="flex items-center gap-2">
+                                      <h4 className="text-xs font-bold text-white truncate">{user.name}</h4>
+                                      {isCurrentUser && (
+                                        <span className="bg-emerald-500/20 text-emerald-300 text-[8px] font-mono uppercase px-1.5 py-0.5 rounded border border-emerald-500/20 font-bold shrink-0">
+                                          You
+                                        </span>
+                                      )}
+                                    </div>
+                                    <p className="text-[10.5px] text-slate-400 truncate font-mono mt-0.5">{user.email}</p>
+                                    <div className="flex items-center gap-3 mt-1.5 font-mono text-[9px] text-slate-500">
+                                      <span>🔥 Streak: <strong className="text-[#00FF95]/95">{user.streak}w</strong></span>
+                                      <span>🎯 Target: <strong className="text-slate-300">{user.weeklyTarget}w/wk</strong></span>
+                                      <span>📈 Completion: <strong className="text-sky-400">{user.completionRate}%</strong></span>
+                                    </div>
+                                  </div>
+                                </div>
+
+                                <button
+                                  onClick={async () => {
+                                    if (!window.confirm(`⚠️ Are you sure you want to PERMANENTLY DELETE user "${user.name}" (${user.email}) from Firestore database? \n\nThis will also expel them from current squads and wipe their history.`)) return;
+                                    try {
+                                      await deleteDoc(doc(db, "users", user.id));
+                                      if (partyDoc) {
+                                        await deleteDoc(doc(db, "parties", partyDoc.id, "members", user.id));
+                                      }
+                                      if (isCurrentUser) {
+                                        await signOut(auth);
+                                      } else {
+                                        alert("Trainee successfully purged.");
+                                      }
+                                    } catch (err: any) {
+                                      console.error(err);
+                                      alert("Could not complete purge operation: " + err.message);
+                                    }
+                                  }}
+                                  className="px-3 py-2 bg-rose-500/10 hover:bg-rose-500 text-rose-400 hover:text-slate-950 rounded-xl text-[10.5px] font-mono font-bold border border-rose-500/20 hover:border-transparent transition flex items-center justify-center gap-1.5 cursor-pointer shrink-0"
+                                >
+                                  <Trash2 className="w-3.5 h-3.5" /> Purge Account
+                                </button>
+                              </div>
+                            );
+                          })
+                        )}
+                      </div>
+                    </div>
+
+                    {/* Admin Codes config */}
+                    <div className="bg-[#090b0e]/60 border border-slate-900/80 rounded-2xl p-6 space-y-6">
+                      <div className="space-y-1">
+                        <h3 className="text-sm font-extrabold text-white uppercase font-display">Manage Security Keys</h3>
+                        <p className="text-xs text-slate-500 font-mono">Create and delete additional administrative access tokens.</p>
+                      </div>
+
+                      <form
+                        onSubmit={async (e) => {
+                          e.preventDefault();
+                          if (!newAdminCodeToAdd.trim()) return;
+                          const formatted = newAdminCodeToAdd.trim().toUpperCase();
+                          try {
+                            await setDoc(doc(db, "admin_codes", formatted), {
+                              code: formatted,
+                              addedAt: new Date().toISOString()
+                            });
+                            setNewAdminCodeToAdd("");
+                            alert(`Admin access key '${formatted}' registered successfully!`);
+                          } catch (err: any) {
+                            console.error(err);
+                            alert("Failed to register code: " + err.message);
+                          }
+                        }}
+                        className="space-y-3"
+                      >
+                        <div className="space-y-1">
+                          <label className="text-[10px] font-mono text-slate-500 uppercase tracking-widest font-bold">New Security Code</label>
+                          <input
+                            type="text"
+                            placeholder="e.g. SQUAD_MOD_2026"
+                            value={newAdminCodeToAdd}
+                            onChange={(e) => setNewAdminCodeToAdd(e.target.value)}
+                            className="w-full bg-slate-900 border border-slate-800 focus:border-rose-500 rounded-xl px-3 py-2.5 text-xs text-white uppercase tracking-wider outline-none transition"
+                          />
+                        </div>
+                        <button
+                          type="submit"
+                          className="w-full bg-[#00FF95] hover:bg-[#00e083] text-slate-950 font-bold text-xs uppercase py-2.5 rounded-xl transition cursor-pointer font-black tracking-wider"
+                        >
+                          Register Security Key
+                        </button>
+                      </form>
+
+                      {/* list of keys */}
+                      <div className="space-y-3 pt-2">
+                        <p className="text-[10px] font-mono text-slate-500 uppercase tracking-widest font-bold">Authorized Keys</p>
+                        <div className="space-y-2 max-h-[220px] overflow-y-auto pr-1">
+                          {/* Default master */}
+                          <div className="bg-slate-900/40 border border-slate-800/80 p-3 rounded-xl flex items-center justify-between text-xs">
+                            <span className="font-mono text-amber-400 font-bold">SQUAD_ADMIN_2026</span>
+                            <span className="text-[9px] font-mono uppercase bg-amber-500/10 text-amber-300 px-2 py-0.5 rounded border border-amber-500/20">System Master</span>
+                          </div>
+
+                          {additionalAdminCodes.map((code) => (
+                            <div key={code} className="bg-slate-900/40 border border-slate-800/80 p-3 rounded-xl flex items-center justify-between text-xs transition">
+                              <span className="font-mono text-rose-300 font-bold">{code}</span>
+                              <button
+                                type="button"
+                                onClick={async () => {
+                                  if (!window.confirm(`Are you sure you want to revoke admin key '${code}'?`)) return;
+                                  try {
+                                    await deleteDoc(doc(db, "admin_codes", code));
+                                  } catch (err: any) {
+                                    console.error(err);
+                                    alert("Could not revoke code: " + err.message);
+                                  }
+                                }}
+                                className="p-1 px-2.5 bg-rose-500/10 hover:bg-rose-500/20 text-rose-400 rounded-lg text-[10px] font-mono font-bold border border-rose-500/20 transition cursor-pointer"
+                              >
+                                Revoke
+                              </button>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              )}
+            </div>
           )}
 
         </div>
