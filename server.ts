@@ -987,34 +987,16 @@ app.post("/api/reminders/test", async (req, res) => {
   });
 });
 
-// Configure Vite middleware or Static Fallback
-async function startServer() {
-  if (process.env.NODE_ENV !== "production") {
-    const { createServer: createViteServer } = await import("vite");
-    const vite = await createViteServer({
-      server: { middlewareMode: true },
-      appType: "spa",
-    });
-    app.use(vite.middlewares);
-    console.log("Vite development server mounted.");
-  } else {
-    const distPath = path.join(process.cwd(), "dist");
-    app.use(express.static(distPath));
-    app.get("*", (req, res) => {
-      res.sendFile(path.join(distPath, "index.html"));
-    });
-    console.log("Production static files server mounted.");
-  }
-
-  if (!process.env.VERCEL) {
-    app.listen(PORT, "0.0.0.0", () => {
-      console.log(`SquadFit App running happily at http://localhost:${PORT}`);
-    });
-  }
-}
-
-if (!process.env.VERCEL) {
-  startServer();
+// Production startup (when run directly in non-Vercel Node environment)
+if (!process.env.VERCEL && process.env.NODE_ENV === "production") {
+  const distPath = path.join(process.cwd(), "dist");
+  app.use(express.static(distPath));
+  app.get("*", (req, res) => {
+    res.sendFile(path.join(distPath, "index.html"));
+  });
+  app.listen(PORT, "0.0.0.0", () => {
+    console.log(`SquadFit App running happily at http://localhost:${PORT}`);
+  });
 }
 
 export default app;
