@@ -58,7 +58,13 @@ export default function App() {
     setIsLoading(true);
     try {
       const response = await fetch("/api/state");
-      if (!response.ok) throw new Error("Could not retrieve squad state.");
+      if (!response.ok) {
+        let text = "";
+        try {
+          text = await response.text();
+        } catch (_) {}
+        throw new Error(`Could not retrieve squad state. Status: ${response.status} (${response.statusText}). Response: ${text.substring(0, 100)}`);
+      }
       const data = await response.json();
       setPartyState(data);
       // Trigger calculation of current active model representation
