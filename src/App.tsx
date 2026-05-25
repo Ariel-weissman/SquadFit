@@ -250,7 +250,12 @@ export default function App() {
     try {
       await signInWithPopup(auth, provider);
     } catch (err: any) {
-      setAuthError(err.message || "Google auth closed or rejected.");
+      console.error("Google login failed:", err);
+      if (err?.code === "auth/unauthorized-domain" || String(err?.message || "").includes("unauthorized-domain")) {
+        setAuthError("Google Sign-In is restricted here because this preview domain is not whitelisted in the Firebase project's authorized domains. Please register or log in using the simple 'Email & Password' form above - it works out-of-the-box!");
+      } else {
+        setAuthError(err.message || "Google auth closed or rejected.");
+      }
       setAuthLoading(false);
     }
   };
