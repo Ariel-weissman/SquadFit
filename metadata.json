@@ -1,0 +1,6 @@
+{
+  "name": "SquadFit",
+  "description": "A competitive, social, and AI-powered gamified gym workout planner with streaks, leaderboards, witty notifications, and dynamic punishments.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
