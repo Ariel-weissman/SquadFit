@@ -27,7 +27,10 @@ import {
   Lock,
   User as UserIcon,
   CheckCircle,
-  LockKeyhole
+  LockKeyhole,
+  Camera,
+  Image,
+  Upload
 } from "lucide-react";
 import { PartyState, DayWorkout, User, ActiveNudge, PunishmentConfig, HistoryEntry, ReminderSettings } from "./types";
 import WorkoutPlanner from "./components/WorkoutPlanner";
@@ -86,6 +89,9 @@ export default function App() {
   const [setupAvatarIndex, setSetupAvatarIndex] = useState<number>(0);
   const [setupTarget, setSetupTarget] = useState<number>(3);
   const [profileSaving, setProfileSaving] = useState<boolean>(false);
+  const [customAvatarBase64, setCustomAvatarBase64] = useState<string>("");
+  const [customAvatarUrl, setCustomAvatarUrl] = useState<string>("");
+  const [avatarSelectionMode, setAvatarSelectionMode] = useState<"premade" | "upload" | "url">("premade");
 
   // Group creation/joining variables
   const [partyCodeInput, setPartyCodeInput] = useState<string>("");
@@ -119,6 +125,34 @@ export default function App() {
   const [limitationsText, setLimitationsText] = useState<string>("parallettes and floor space only, no heavy squat rack");
   const [isGeneratingPlan, setIsGeneratingPlan] = useState<boolean>(false);
 
+  // Profile editing inputs
+  const [editNameProfile, setEditNameProfile] = useState<string>("");
+  const [editAvatarIndex, setEditAvatarIndex] = useState<number>(0);
+  const [editCustomAvatarBase64, setEditCustomAvatarBase64] = useState<string>("");
+  const [editCustomAvatarUrl, setEditCustomAvatarUrl] = useState<string>("");
+  const [editAvatarMode, setEditAvatarMode] = useState<"premade" | "upload" | "url">("premade");
+  const [editProfileTarget, setEditProfileTarget] = useState<number>(3);
+  const [editProfileSaving, setEditProfileSaving] = useState<boolean>(false);
+
+  // Sync profile edits with session profile state
+  useEffect(() => {
+    if (userProfile) {
+      setEditNameProfile(userProfile.name || "");
+      setEditProfileTarget(userProfile.weeklyTarget || 3);
+      const matchedIdx = AVATARS.findIndex(av => av.url === userProfile.avatar);
+      if (matchedIdx !== -1) {
+        setEditAvatarIndex(matchedIdx);
+        setEditAvatarMode("premade");
+      } else if (userProfile.avatar && userProfile.avatar.startsWith("data:image")) {
+        setEditCustomAvatarBase64(userProfile.avatar);
+        setEditAvatarMode("upload");
+      } else if (userProfile.avatar) {
+        setEditCustomAvatarUrl(userProfile.avatar);
+        setEditAvatarMode("url");
+      }
+    }
+  }, [userProfile, activeTab]);
+
   // Dynamic dynamic penalty splits outcomes
   const [punishmentOutcome, setPunishmentOutcome] = useState<any>(null);
   const [isCalcingPenalty, setIsCalcingPenalty] = useState<boolean>(false);
@@ -149,9 +183,11 @@ export default function App() {
 
   // Admin Registered Users State
   const [allRegisteredUsers, setAllRegisteredUsers] = useState<User[]>([]);
+  const [allPartiesList, setAllPartiesList] = useState<any[]>([]);
 
   useEffect(() => {
     if (!firebaseUser || activeTab !== "admin") return;
+    
     const unsubscribeAllUsers = onSnapshot(collection(db, "users"), (snap) => {
       const list: User[] = [];
       snap.forEach((d) => {
@@ -161,28 +197,57 @@ export default function App() {
     }, (err) => {
       console.error("All users subscription failed: ", err);
     });
-    return () => unsubscribeAllUsers();
+
+    const unsubscribeAllParties = onSnapshot(collection(db, "parties"), (snap) => {
+      const list: any[] = [];
+      snap.forEach((d) => {
+        list.push({ id: d.id, ...d.data() });
+      });
+      setAllPartiesList(list);
+    }, (err) => {
+      console.error("All parties subscription failed: ", err);
+    });
+
+    return () => {
+      unsubscribeAllUsers();
+      unsubscribeAllParties();
+    };
   }, [firebaseUser, activeTab]);
 
   // 1. Listen for standard Authentication states on mount
   useEffect(() => {
+    let unsubscribeProfile: (() => void) | null = null;
     const unsubscribeAuth = onAuthStateChanged(auth, async (user) => {
       setFirebaseUser(user);
+      if (unsubscribeProfile) {
+        unsubscribeProfile();
+        unsubscribeProfile = null;
+      }
       if (user) {
-        // Fetch or listen to their profile
+        // Real-time listener on their profile
         const profileRef = doc(db, "users", user.uid);
-        const profileSnap = await getDoc(profileRef);
-        if (profileSnap.exists()) {
-          setUserProfile(profileSnap.data() as User);
-        } else {
-          setUserProfile(null); // Triggers Profile Onboarding flow
-        }
+        unsubscribeProfile = onSnapshot(profileRef, (snap) => {
+          if (snap.exists()) {
+            setUserProfile(snap.data() as User);
+          } else {
+            setUserProfile(null); // Triggers Profile Onboarding flow
+          }
+          setAuthLoading(false);
+        }, (err) => {
+          console.error("User profile subscription error:", err);
+          setAuthLoading(false);
+        });
       } else {
         setUserProfile(null);
+        setAuthLoading(false);
       }
-      setAuthLoading(false);
     });
-    return () => unsubscribeAuth();
+    return () => {
+      unsubscribeAuth();
+      if (unsubscribeProfile) {
+        unsubscribeProfile();
+      }
+    };
   }, []);
 
   // 2. Set up realtime listeners once the authenticated profile has an active currentPartyId
@@ -320,6 +385,23 @@ export default function App() {
     }
   };
 
+  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    if (file.size > 1500000) {
+      alert("Please upload an image smaller than 1.5MB to save profile storage.");
+      return;
+    }
+    const reader = new FileReader();
+    reader.onloadend = () => {
+      if (typeof reader.result === "string") {
+        setCustomAvatarBase64(reader.result);
+        setEditCustomAvatarBase64(reader.result);
+      }
+    };
+    reader.readAsDataURL(file);
+  };
+
   // Custom onboarding first profile configurations logger
   const handleSaveProfile = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -327,13 +409,19 @@ export default function App() {
     setProfileSaving(true);
     try {
       const uId = firebaseUser.uid;
-      const avatarUrl = AVATARS[setupAvatarIndex].url;
+      
+      let avatarUrl = AVATARS[setupAvatarIndex]?.url;
+      if (avatarSelectionMode === "upload" && customAvatarBase64) {
+        avatarUrl = customAvatarBase64;
+      } else if (avatarSelectionMode === "url" && customAvatarUrl.trim()) {
+        avatarUrl = customAvatarUrl.trim();
+      }
 
       const profilePayload: User = {
         id: uId,
         name: setupName,
         email: firebaseUser.email || "",
-        avatar: avatarUrl,
+        avatar: avatarUrl || AVATARS[0].url,
         streak: 3, // start with 3 motivational days
         completionRate: 0,
         workoutsCompleted: 0,
@@ -348,6 +436,57 @@ export default function App() {
       console.error(err);
     } finally {
       setProfileSaving(false);
+    }
+  };
+
+  // Save modifications to the current user profile (nickname, picture, target)
+  const handleUpdateProfile = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!editNameProfile.trim() || !userProfile || !firebaseUser) return;
+    setEditProfileSaving(true);
+    try {
+      let finalAvatar = AVATARS[editAvatarIndex]?.url;
+      if (editAvatarMode === "upload" && editCustomAvatarBase64) {
+        finalAvatar = editCustomAvatarBase64;
+      } else if (editAvatarMode === "url" && editCustomAvatarUrl.trim()) {
+        finalAvatar = editCustomAvatarUrl.trim();
+      }
+
+      await updateDoc(doc(db, "users", firebaseUser.uid), {
+        name: editNameProfile.trim(),
+        avatar: finalAvatar || AVATARS[0].url,
+        weeklyTarget: editProfileTarget
+      });
+
+      alert("Profile updated successfully!");
+    } catch (err: any) {
+      console.error(err);
+      alert("Failed to update profile: " + err.message);
+    } finally {
+      setEditProfileSaving(false);
+    }
+  };
+
+  // Permanently disassemble a workout squad and reset members back to activation screen
+  const handleDeleteParty = async (partyId: string, partyName: string) => {
+    if (!window.confirm(`⚠️ Are you sure you want to PERMANENTLY DELETE the workout squad "${partyName}"? \n\nThis will instantly dissolve the squad, remove all members, and obliterate its training plans and history logs.`)) return;
+    
+    try {
+      // 1. Disconnect all users currently registered inside this party
+      const squadMembers = allRegisteredUsers.filter(u => u.currentPartyId === partyId);
+      for (const m of squadMembers) {
+        await updateDoc(doc(db, "users", m.id), {
+          currentPartyId: ""
+        });
+      }
+
+      // 2. Delete the main party doc
+      await deleteDoc(doc(db, "parties", partyId));
+
+      alert(`Squad "${partyName}" has been successfully deleted.`);
+    } catch (err: any) {
+      console.error(err);
+      alert("Failed to delete squad: " + err.message);
     }
   };
 
@@ -1074,25 +1213,118 @@ export default function App() {
             </div>
 
             <div>
-              <label className="block text-xs font-mono uppercase text-slate-400 mb-2">Select Visual Trainee Avatar</label>
-              <div className="grid grid-cols-4 gap-2">
-                {AVATARS.map((av, idx) => {
-                  const isSelected = setupAvatarIndex === idx;
-                  return (
-                    <button
-                      key={idx}
-                      type="button"
-                      onClick={() => setSetupAvatarIndex(idx)}
-                      className={`relative p-1 rounded-xl border transition-all ${
-                        isSelected ? "border-[#00FF95] bg-[#00ff950a] scale-105" : "border-slate-800 hover:border-slate-700 hover:bg-slate-900"
-                      }`}
-                    >
-                      <img src={av.url} alt={av.name} className="w-full h-12 rounded-lg object-cover" />
-                      {isSelected && <div className="absolute top-0 right-0 -m-1 w-3.5 h-3.5 bg-emerald-500 rounded-full flex items-center justify-center border-2 border-[#111215] text-[7px] text-black">✓</div>}
-                    </button>
-                  );
-                })}
+              <label className="block text-xs font-mono uppercase text-slate-400 mb-2">Configure Trainee Profile Picture</label>
+              
+              <div className="grid grid-cols-3 gap-1 p-1 bg-slate-950 rounded-xl border border-slate-800 mb-3">
+                <button
+                  type="button"
+                  onClick={() => setAvatarSelectionMode("premade")}
+                  className={`py-1.5 text-[10.5px] font-mono font-bold rounded-lg transition-all cursor-pointer ${
+                    avatarSelectionMode === "premade"
+                      ? "bg-slate-800 text-[#00FF95]"
+                      : "text-slate-400 hover:text-white"
+                  }`}
+                >
+                  Premade
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setAvatarSelectionMode("upload")}
+                  className={`py-1.5 text-[10.5px] font-mono font-bold rounded-lg transition-all cursor-pointer ${
+                    avatarSelectionMode === "upload"
+                      ? "bg-slate-800 text-[#00FF95]"
+                      : "text-slate-400 hover:text-white"
+                  }`}
+                >
+                  Upload File
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setAvatarSelectionMode("url")}
+                  className={`py-1.5 text-[10.5px] font-mono font-bold rounded-lg transition-all cursor-pointer ${
+                    avatarSelectionMode === "url"
+                      ? "bg-slate-800 text-[#00FF95]"
+                      : "text-slate-400 hover:text-white"
+                  }`}
+                >
+                  Image URL
+                </button>
               </div>
+
+              {avatarSelectionMode === "premade" && (
+                <div className="grid grid-cols-4 gap-2">
+                  {AVATARS.map((av, idx) => {
+                    const isSelected = setupAvatarIndex === idx;
+                    return (
+                      <button
+                        key={idx}
+                        type="button"
+                        onClick={() => setSetupAvatarIndex(idx)}
+                        className={`relative p-1 rounded-xl border transition-all cursor-pointer ${
+                          isSelected ? "border-[#00FF95] bg-[#00ff950a] scale-105" : "border-slate-800 hover:border-slate-700 hover:bg-slate-900"
+                        }`}
+                      >
+                        <img src={av.url} alt={av.name} className="w-full h-12 rounded-lg object-cover" />
+                        {isSelected && <div className="absolute top-0 right-0 -m-1 w-3.5 h-3.5 bg-emerald-500 rounded-full flex items-center justify-center border-2 border-[#111215] text-[7px] text-black font-extrabold">✓</div>}
+                      </button>
+                    );
+                  })}
+                </div>
+              )}
+
+              {avatarSelectionMode === "upload" && (
+                <div className="space-y-3">
+                  <div className="flex items-center gap-3 bg-slate-950 p-3 rounded-xl border border-slate-800">
+                    <div className="w-14 h-14 bg-slate-900 rounded-xl overflow-hidden shrink-0 border border-slate-800 flex items-center justify-center text-slate-500">
+                      {customAvatarBase64 ? (
+                        <img src={customAvatarBase64} alt="Preview" className="w-full h-full object-cover" />
+                      ) : (
+                        <Camera className="w-6 h-6" />
+                      )}
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <p className="text-[11px] font-mono text-slate-400 uppercase font-bold">Upload Custom Avatar</p>
+                      <input
+                        type="file"
+                        accept="image/*"
+                        onChange={handleFileChange}
+                        className="hidden"
+                        id="onboarding-avatar-file-input"
+                      />
+                      <label
+                        htmlFor="onboarding-avatar-file-input"
+                        className="inline-flex mt-1.5 px-3 py-1.5 bg-slate-900 hover:bg-slate-800 text-xs font-mono font-semibold text-white rounded-lg border border-slate-800 transition cursor-pointer"
+                      >
+                        <Upload className="w-3 h-3 mr-1.5 self-center" /> Choose Image File
+                      </label>
+                    </div>
+                  </div>
+                  {customAvatarBase64 && (
+                    <p className="text-[9.5px] font-mono text-emerald-400">✓ Personalized file processed successfully!</p>
+                  )}
+                </div>
+              )}
+
+              {avatarSelectionMode === "url" && (
+                <div className="space-y-2">
+                  <div className="flex gap-2">
+                    <input
+                      type="url"
+                      placeholder="https://images.unsplash.com/photo-..."
+                      value={customAvatarUrl}
+                      onChange={(e) => setCustomAvatarUrl(e.target.value)}
+                      className="flex-1 bg-slate-950 border border-slate-800 focus:border-[#00FF95] rounded-xl px-3 py-2 text-xs text-white outline-none"
+                    />
+                    {customAvatarUrl && (
+                      <div className="w-10 h-10 rounded-xl overflow-hidden shrink-0 border border-slate-800 bg-slate-950">
+                        <img src={customAvatarUrl} alt="Preview" className="w-full h-full object-cover" onError={(e) => { (e.target as any).src = AVATARS[0].url; }} />
+                      </div>
+                    )}
+                  </div>
+                  <span className="text-[10px] text-slate-500 block">Provide any direct web address starting with http/https.</span>
+                </div>
+              )}
+              
               <span className="text-[10px] text-slate-500 mt-1.5 block">Used to rank your profile on the live squad leaderboard.</span>
             </div>
 
@@ -1338,6 +1570,19 @@ export default function App() {
             </button>
 
             <button
+              id="nav-btn-profile"
+              onClick={() => setActiveTab("profile")}
+              className={`w-full flex items-center gap-3.5 px-4 py-3 rounded-xl text-sm transition-all text-left cursor-pointer ${
+                activeTab === "profile"
+                  ? "bg-[#00ff951a] text-[#00FF95] font-extrabold border-l-4 border-[#00FF95]"
+                  : "text-[#888888] hover:text-[#00FF95] hover:bg-[#ffffff05]"
+              }`}
+            >
+              <UserIcon className="w-4.5 h-4.5" />
+              <span>My Profile Settings</span>
+            </button>
+
+            <button
               id="nav-btn-admin"
               onClick={() => setActiveTab("admin")}
               className={`w-full flex items-center gap-3.5 px-4 py-3 rounded-xl text-sm transition-all text-left cursor-pointer ${
@@ -1398,6 +1643,10 @@ export default function App() {
         <button onClick={() => setActiveTab("history")} className={`flex flex-col items-center justify-center p-1 cursor-pointer ${activeTab === "history" ? "text-[#00FF95]" : "text-slate-500"}`}>
           <Calendar className="w-5 h-5" />
           <span className="text-[9px] mt-0.5 font-mono">Logs</span>
+        </button>
+        <button onClick={() => setActiveTab("profile")} className={`flex flex-col items-center justify-center p-1 cursor-pointer ${activeTab === "profile" ? "text-[#00FF95]" : "text-slate-500"}`}>
+          <UserIcon className="w-5 h-5" />
+          <span className="text-[9px] mt-0.5 font-mono">Profile</span>
         </button>
         <button onClick={() => setActiveTab("admin")} className={`flex flex-col items-center justify-center p-1 cursor-pointer ${activeTab === "admin" ? "text-rose-400" : "text-slate-500"}`}>
           <LockKeyhole className="w-5 h-5" />
@@ -1787,6 +2036,202 @@ export default function App() {
             />
           )}
 
+          {activeTab === "profile" && userProfile && (
+            <div id="profile-settings-panel" className="max-w-2xl mx-auto space-y-6">
+              <div className="bg-gradient-to-r from-emerald-950/20 to-slate-900/40 border border-emerald-500/20 p-6 rounded-2xl flex items-center gap-4">
+                <div className="p-3 bg-emerald-500/10 text-emerald-400 rounded-xl border border-[#00FF95]/20">
+                  <UserIcon className="w-6 h-6" />
+                </div>
+                <div>
+                  <h2 className="text-base font-display font-extrabold text-white uppercase tracking-tight">
+                    Trainee Profile Customisation
+                  </h2>
+                  <p className="text-xs text-slate-400 mt-1">
+                    Manage your tactical training callsign, aesthetic display avatar, and weekly workout goals.
+                  </p>
+                </div>
+              </div>
+
+              <div className="bg-[#090b0e]/60 border border-slate-900/80 rounded-2xl p-6 sm:p-8">
+                <form onSubmit={handleUpdateProfile} className="space-y-6">
+                  {/* Current profile status glance */}
+                  <div className="p-4 bg-slate-950 rounded-xl border border-slate-900 flex items-center gap-4">
+                    <img 
+                      src={
+                        editAvatarMode === "premade" 
+                          ? AVATARS[editAvatarIndex]?.url 
+                          : editAvatarMode === "upload" 
+                          ? editCustomAvatarBase64 || userProfile.avatar 
+                          : editCustomAvatarUrl || userProfile.avatar
+                      } 
+                      alt="Current preview" 
+                      className="w-14 h-14 rounded-xl object-cover border border-slate-800 shrink-0"
+                      onError={(e) => { (e.target as any).src = AVATARS[0].url; }}
+                    />
+                    <div>
+                      <h4 className="text-xs font-mono uppercase text-slate-500">Active Identity Preview</h4>
+                      <p className="text-sm font-bold text-white mt-0.5">{editNameProfile || userProfile.name}</p>
+                      <div className="flex items-center gap-2 mt-1 shrink-0 font-mono text-[9px] text-slate-400">
+                        <span className="bg-[#00ff951a] text-[#00FF95] px-2 py-0.5 rounded border border-[#00FF95]/20">🔥 {userProfile.streak}w streak</span>
+                        <span className="bg-slate-900 text-slate-300 px-2 py-0.5 rounded border border-slate-800">🎯 {editProfileTarget} workouts target</span>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Nickname */}
+                  <div className="space-y-1 text-left">
+                    <label className="text-xs font-mono text-slate-400 uppercase tracking-widest font-bold block mb-1">Trainee Callsign (Nickname)</label>
+                    <input
+                      type="text"
+                      required
+                      value={editNameProfile}
+                      onChange={(e) => setEditNameProfile(e.target.value)}
+                      placeholder="e.g. SQUAD_COMMANDER_01"
+                      className="w-full bg-slate-950 border border-slate-800 focus:border-[#00FF95] rounded-xl px-4 py-3 text-sm text-white placeholder-slate-700 outline-none transition"
+                    />
+                  </div>
+
+                  {/* Picture Modes Selector */}
+                  <div className="space-y-2">
+                    <label className="text-xs font-mono text-slate-400 uppercase tracking-widest font-bold block">Aesthetic Visual Avatar</label>
+                    <div className="grid grid-cols-3 gap-1 p-1 bg-slate-950 rounded-xl border border-slate-800">
+                      <button
+                        type="button"
+                        onClick={() => setEditAvatarMode("premade")}
+                        className={`py-2 text-xs font-mono font-bold rounded-lg transition-all cursor-pointer ${
+                          editAvatarMode === "premade"
+                            ? "bg-slate-800 text-[#00FF95]"
+                            : "text-slate-400 hover:text-white"
+                        }`}
+                      >
+                        Premade
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setEditAvatarMode("upload")}
+                        className={`py-2 text-xs font-mono font-bold rounded-lg transition-all cursor-pointer ${
+                          editAvatarMode === "upload"
+                            ? "bg-slate-800 text-[#00FF95]"
+                            : "text-slate-400 hover:text-white"
+                        }`}
+                      >
+                        Upload File
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setEditAvatarMode("url")}
+                        className={`py-2 text-xs font-mono font-bold rounded-lg transition-all cursor-pointer ${
+                          editAvatarMode === "url"
+                            ? "bg-slate-800 text-[#00FF95]"
+                            : "text-slate-400 hover:text-white"
+                        }`}
+                      >
+                        Image URL
+                      </button>
+                    </div>
+
+                    {/* Premade option content */}
+                    {editAvatarMode === "premade" && (
+                      <div className="grid grid-cols-4 gap-2 pt-1">
+                        {AVATARS.map((av, idx) => {
+                          const isSelected = editAvatarIndex === idx;
+                          return (
+                            <button
+                              key={idx}
+                              type="button"
+                              onClick={() => setEditAvatarIndex(idx)}
+                              className={`relative p-1 rounded-xl border transition-all cursor-pointer ${
+                                isSelected ? "border-[#00FF95] bg-[#00ff950a] scale-105" : "border-slate-800 hover:border-slate-700 hover:bg-slate-900"
+                              }`}
+                            >
+                              <img src={av.url} alt={av.name} className="w-full h-12 rounded-lg object-cover" />
+                              {isSelected && <div className="absolute top-0 right-0 -m-1 w-3.5 h-3.5 bg-emerald-500 rounded-full flex items-center justify-center border-2 border-[#111215] text-[7px] text-black font-extrabold">✓</div>}
+                            </button>
+                          );
+                        })}
+                      </div>
+                    )}
+
+                    {/* Upload File option content */}
+                    {editAvatarMode === "upload" && (
+                      <div className="space-y-3 pt-1">
+                        <div className="flex items-center gap-3 bg-slate-950 p-3 rounded-xl border border-slate-800">
+                          <div className="w-14 h-14 bg-slate-900 rounded-xl overflow-hidden shrink-0 border border-slate-800 flex items-center justify-center text-slate-500">
+                            {editCustomAvatarBase64 ? (
+                              <img src={editCustomAvatarBase64} alt="Preview" className="w-full h-full object-cover" />
+                            ) : (
+                              <Camera className="w-6 h-6" />
+                            )}
+                          </div>
+                          <div className="flex-1 min-w-0">
+                            <p className="text-[11px] font-mono text-slate-400 uppercase font-bold">Pick local photograph</p>
+                            <input
+                              type="file"
+                              accept="image/*"
+                              onChange={handleFileChange}
+                              className="hidden"
+                              id="edit-profile-avatar-file-input"
+                            />
+                            <label
+                              htmlFor="edit-profile-avatar-file-input"
+                              className="inline-flex mt-1.5 px-3 py-1.5 bg-slate-900 hover:bg-slate-800 text-xs font-mono font-semibold text-white rounded-lg border border-slate-800 transition cursor-pointer"
+                            >
+                              <Upload className="w-3 h-3 mr-1.5 self-center" /> Choose Image File
+                            </label>
+                          </div>
+                        </div>
+                        {editCustomAvatarBase64 && (
+                          <p className="text-[9.5px] font-mono text-emerald-400">✓ Personalized file processed successfully!</p>
+                        )}
+                      </div>
+                    )}
+
+                    {/* Web Image URL option content */}
+                    {editAvatarMode === "url" && (
+                      <div className="space-y-2 pt-1">
+                        <div className="flex gap-2">
+                          <input
+                            type="url"
+                            placeholder="https://images.unsplash.com/photo-..."
+                            value={editCustomAvatarUrl}
+                            onChange={(e) => setEditCustomAvatarUrl(e.target.value)}
+                            className="flex-1 bg-slate-950 border border-slate-800 focus:border-[#00FF95] rounded-xl px-3 py-2 text-xs text-white outline-none"
+                          />
+                        </div>
+                        <span className="text-[10px] text-[#888888] block">Provide any direct link starting with http/https.</span>
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Weekly goal target days */}
+                  <div className="space-y-1 text-left">
+                    <label className="text-xs font-mono text-slate-400 uppercase tracking-widest font-bold block mb-1">Weekly Target Workout Days</label>
+                    <select
+                      value={editProfileTarget}
+                      onChange={(e) => setEditProfileTarget(Number(e.target.value))}
+                      className="w-full bg-slate-950 border border-slate-800 focus:border-[#00FF95] rounded-xl px-4 py-3 text-white text-sm outline-none font-mono"
+                    >
+                      <option value={3}>3 Days/Week (Maintain Strength)</option>
+                      <option value={4}>4 Days/Week (Active Growth)</option>
+                      <option value={5}>5 Days/Week (High Performance Warrior)</option>
+                    </select>
+                  </div>
+
+                  {/* Submission action */}
+                  <div className="pt-2">
+                    <button
+                      type="submit"
+                      disabled={editProfileSaving}
+                      className="w-full bg-[#00FF95] hover:bg-[#00e083] disabled:opacity-50 text-slate-950 font-black tracking-wider text-xs uppercase py-3.5 rounded-xl transition shadow-lg shadow-[#00FF95]/10 cursor-pointer text-center font-bold"
+                    >
+                      {editProfileSaving ? "Saving Identity Configs..." : "Save Changes"}
+                    </button>
+                  </div>
+                </form>
+              </div>
+            </div>
+          )}
+
           {activeTab === "admin" && (
             <div id="admin-panel" className="space-y-6">
               {!isAdminUnlocked ? (
@@ -2023,6 +2468,96 @@ export default function App() {
                           ))}
                         </div>
                       </div>
+                    </div>
+                  </div>
+
+                  {/* Squad Party & Activity Management Board */}
+                  <div className="bg-[#090b0e]/60 border border-slate-900/80 rounded-2xl p-6 space-y-6">
+                    <div>
+                      <h3 className="text-sm font-extrabold text-white uppercase font-display flex items-center gap-2">
+                        <Users className="text-rose-400 w-4 h-4" /> Active Squad Parties Directory ({allPartiesList.length})
+                      </h3>
+                      <p className="text-xs text-slate-500 mt-1 font-mono">
+                        Monitor active routines, view participating trainees, watch activity levels, or delete groups.
+                      </p>
+                    </div>
+
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                      {allPartiesList.length === 0 ? (
+                        <div className="col-span-2 text-center py-12 text-slate-500 font-mono text-xs border border-dashed border-slate-800 rounded-xl bg-slate-950/20">
+                          No active fitness workout parties matching in database.
+                        </div>
+                      ) : (
+                        allPartiesList.map((party) => {
+                          const partyMembers = allRegisteredUsers.filter(u => u.currentPartyId === party.id);
+                          
+                          return (
+                            <div 
+                              key={party.id}
+                              className="bg-slate-900/30 hover:bg-slate-900/70 border border-slate-800/80 hover:border-slate-800 p-4 rounded-xl space-y-4 transition flex flex-col justify-between"
+                            >
+                              <div className="space-y-3 font-sans text-left">
+                                <div className="flex items-start justify-between">
+                                  <div>
+                                    <h4 className="font-bold text-white text-sm">{party.name || "Unnamed Party"}</h4>
+                                    <span className="font-mono text-[9px] text-slate-500 tracking-wider">CODE: <strong className="text-[#00FF95] uppercase">{party.code}</strong></span>
+                                  </div>
+                                  <button
+                                    onClick={() => handleDeleteParty(party.id, party.name || "Unnamed")}
+                                    className="p-1.5 bg-rose-500/10 hover:bg-rose-500 text-rose-400 hover:text-slate-950 rounded-lg text-xs font-mono font-bold border border-rose-500/20 hover:border-transparent transition flex items-center gap-1 cursor-pointer"
+                                    title="Disband workout party"
+                                  >
+                                    <Trash2 className="w-3.5 h-3.5" /> Disband
+                                  </button>
+                                </div>
+
+                                <div className="grid grid-cols-2 gap-2 text-[10px] bg-slate-950/40 p-2.5 rounded-lg border border-slate-900 font-mono">
+                                  <div>
+                                    <span className="text-slate-500 block">Weekly Routine:</span>
+                                    <span className="text-slate-300 font-bold">{party.activePlan ? `${party.activePlan.length} days` : "No active plan"}</span>
+                                  </div>
+                                  <div>
+                                    <span className="text-slate-500 block">Slack Fine:</span>
+                                    <span className="text-amber-400 font-bold">
+                                      {party.punishmentConfig?.penaltyType === "split" 
+                                        ? `$${party.punishmentConfig?.splitAmount || 0} Split` 
+                                        : `$${party.punishmentConfig?.flatAmount || 0} Solo`
+                                      }
+                                    </span>
+                                  </div>
+                                </div>
+
+                                <div className="space-y-1.5">
+                                  <span className="text-[10px] font-mono text-slate-500 uppercase tracking-wider block">Trainees ({partyMembers.length}) & Progress:</span>
+                                  {partyMembers.length === 0 ? (
+                                    <p className="text-[10.5px] text-slate-600 font-mono italic">No trainees active inside this party.</p>
+                                  ) : (
+                                    <div className="space-y-1 max-h-[140px] overflow-y-auto pr-1">
+                                      {partyMembers.map(m => (
+                                        <div key={m.id} className="flex items-center justify-between text-xs bg-slate-950/20 p-1.5 rounded border border-slate-900/60 font-mono">
+                                          <div className="flex items-center gap-1.5 min-w-0">
+                                            <img src={m.avatar} alt={m.name} className="w-4 h-4 rounded-full object-cover border border-slate-800 shrink-0" />
+                                            <span className="text-slate-300 font-bold truncate">{m.name}</span>
+                                          </div>
+                                          <div className="text-[9.5px] text-slate-400 font-mono shrink-0 flex items-center gap-1.5">
+                                            <span className="text-indigo-400">🔥{m.streak}w</span>
+                                            <span className="text-emerald-400">💪{m.workoutsCompleted} done</span>
+                                          </div>
+                                        </div>
+                                      ))}
+                                    </div>
+                                  )}
+                                </div>
+                              </div>
+
+                              <div className="text-[9.5px] font-mono text-slate-500 border-t border-slate-900 pt-2.5 flex items-center justify-between">
+                                <span>Ref: {party.id.substring(0, 8)}...</span>
+                                <span className="bg-slate-950 px-2 py-0.5 rounded border border-slate-900 text-[8.5px] text-slate-400">Activity Level: Active</span>
+                              </div>
+                            </div>
+                          );
+                        })
+                      )}
                     </div>
                   </div>
                 </div>

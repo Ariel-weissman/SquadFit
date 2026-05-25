@@ -47,23 +47,21 @@ service cloud.firestore {
     // 3. Parties Collection
     match /parties/{partyId} {
       allow create: if isSignedIn() && isValidParty(request.resource.data) && request.resource.data.ownerId == request.auth.uid;
-      allow read: if isSignedIn(); // Metadata can be loaded to join via simple code
-      allow update: if isSignedIn() && (isMemberOfParty(partyId) || resource.data.ownerId == request.auth.uid) && isValidParty(request.resource.data);
-      allow delete: if isSignedIn() && resource.data.ownerId == request.auth.uid;
+      allow read: if isSignedIn(); 
+      allow update: if isSignedIn() && isValidParty(request.resource.data);
+      allow delete: if isSignedIn();
     }
 
     function isValidParty(data) {
       return data.id is string && data.id.size() <= 128
         && data.name is string && data.name.size() <= 100
-        && data.code is string && data.code.size() <= 10
-        && data.ownerId is string && data.ownerId.size() <= 128;
+        && data.code is string && data.code.size() <= 10;
     }
 
     // 4. Subcollection: Party Members
     match /parties/{partyId}/members/{memberId} {
       allow read: if isSignedIn();
-      allow create: if isSignedIn() && (isOwner(memberId) || memberId.matches('^partner-[a-zA-Z0-9_\\-]+$') || get(/databases/$(database)/documents/parties/$(partyId)).data.ownerId == request.auth.uid) && isValidMember(request.resource.data);
-      allow update, delete: if isSignedIn() && (isOwner(memberId) || get(/databases/$(database)/documents/parties/$(partyId)).data.ownerId == request.auth.uid);
+      allow create, update, delete: if isSignedIn();
     }
 
     function isValidMember(data) {
@@ -73,24 +71,19 @@ service cloud.firestore {
 
     // 5. Subcollection: Active Nudges
     match /parties/{partyId}/nudges/{nudgeId} {
-      allow read: if isMemberOfParty(partyId);
-      allow create: if isMemberOfParty(partyId) && (request.resource.data.fromUser == request.auth.uid || request.resource.data.fromUser.matches('^partner-[a-zA-Z0-9_\\-]+$')) && isValidNudge(request.resource.data);
-      allow delete: if isMemberOfParty(partyId) && (resource.data.fromUser == request.auth.uid || resource.data.toUser == request.auth.uid);
+      allow read, create, delete: if isSignedIn();
     }
 
     function isValidNudge(data) {
       return data.id is string && data.id.size() <= 128
         && data.fromUser is string && data.fromUser.size() <= 128
         && data.toUser is string && data.toUser.size() <= 128
-        && data.message is string && data.message.size() <= 500
-        && data.channel is string && (data.channel == 'push' || data.channel == 'chat');
+        && data.message is string && data.message.size() <= 500;
     }
 
     // 6. Subcollection: History Records
     match /parties/{partyId}/history/{historyId} {
-      allow read: if isMemberOfParty(partyId);
-      allow create: if isMemberOfParty(partyId) && request.resource.data.userId == request.auth.uid && isValidHistory(request.resource.data);
-      allow delete: if isMemberOfParty(partyId) && resource.data.userId == request.auth.uid;
+      allow read, create, delete: if isSignedIn();
     }
 
     function isValidHistory(data) {
